@@ -36,6 +36,15 @@ interface AppContextType {
     columns: ColumnConfig[];
     setColumns: (columns: ColumnConfig[]) => void;
     updateColumn: (id: string, title: string) => void;
+
+    // Autocomplete
+    searchNotes: (query: string) => string[];
+
+    // Add Task Modal
+    isAddTaskModalOpen: boolean;
+    setAddTaskModalOpen: (open: boolean) => void;
+    addTaskDefaultColumn: string | undefined;
+    setAddTaskDefaultColumn: (column: string | undefined) => void;
 }
 
 export interface ColumnConfig {
@@ -52,6 +61,10 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const [isScanning, setIsScanning] = useState(false);
     const [viewingFile, setViewingFile] = useState<{ title: string, content: string } | null>(null);
     const [activeTask, setActiveTask] = useState<Task | null>(null);
+
+    // Add Task Modal State
+    const [isAddTaskModalOpen, setAddTaskModalOpen] = useState(false);
+    const [addTaskDefaultColumn, setAddTaskDefaultColumn] = useState<string | undefined>(undefined);
 
     // Load columns from localStorage or default
     const [columns, setColumns] = useState<ColumnConfig[]>(() => {
@@ -427,11 +440,13 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const openLink = async (linkText: string) => {
-        // Search in cache keys
+        // 1. Search in cache keys
         let targetPath: string | undefined;
 
         for (const path of fileCache.current.keys()) {
             const fileName = path.split('/').pop()?.replace('.md', '');
+            // Simple matching: exact match or case-insensitive? Obsidian is usually case-insensitive but exact on file system.
+            // Let's stick to exact for now or permissive.
             if (fileName === linkText || fileName === linkText.replace('.md', '')) {
                 targetPath = path;
                 break;
@@ -441,7 +456,6 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
         if (targetPath) {
             const cached = fileCache.current.get(targetPath);
             if (cached) {
-                // Now we have the content directly from cache!
                 setViewingFile({
                     title: targetPath.split('/').pop() || 'Note',
                     content: cached.content
@@ -449,7 +463,61 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
                 return;
             }
         }
-        console.warn("Link not found:", linkText);
+
+        // 2. If not found, create it!
+        // We assume linkText is just a filename like "New Note". 
+        // We will create it at root for simplicity.
+        // TODO: Support / in linkText for nested creation?
+        if (messageUserForCreation(linkText)) {
+            try {
+                if (!fs.rootHandle) return;
+
+                const fileName = linkText.endsWith('.md') ? linkText : `${linkText}.md`;
+                // Create empty file
+                const fileHandle = await fs.rootHandle.getFileHandle(fileName, { create: true });
+                await fileHandle.getFile(); // Just to confirm creation? Or we can skip.
+                const content = ""; // Empty content
+
+                // Update cache immediately so we can view it
+                // We construct a fake path. 
+                // NOTE: useFileSystem scanDirectory uses `${path}/${entry.name}` which usually starts with / if path is empty string?
+                // Let's check scanDirectory: scanDirectory(handle, path='') -> entries push `${path}/${entry.name}` -> `/Filename.md`
+                const newPath = `/${fileName}`;
+
+                fileCache.current.set(newPath, {
+                    lastModified: Date.now(),
+                    tasks: [],
+                    content: content
+                });
+
+                // Refresh tasks in background to be safe, but open immediately
+                void fs.getAllMarkdownFiles(); // Just trigger check? actually getAllMarkdownFiles returns promise, we can ignore it.
+
+                setViewingFile({
+                    title: fileName,
+                    content: content
+                });
+
+            } catch (err) {
+                console.error("Failed to create new note:", err);
+            }
+        }
+    };
+
+    const messageUserForCreation = (_: string) => true;
+
+    const searchNotes = (query: string): string[] => {
+        if (!query) return [];
+        const matches: string[] = [];
+        const lowerQuery = query.toLowerCase();
+
+        for (const path of fileCache.current.keys()) {
+            const fileName = path.split('/').pop()?.replace('.md', '') || '';
+            if (fileName.toLowerCase().includes(lowerQuery)) {
+                matches.push(fileName);
+            }
+        }
+        return matches.slice(0, 10); // Limit results
     };
 
     return (
@@ -465,14 +533,19 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
             viewingFile,
             setViewingFile,
             openLink,
-            activeTask, // Linked to selection
+            activeTask,
             setActiveTask,
-            modalTask: activeTask, // Alias for backward compatibility
-            setModalTask: setActiveTask, // Alias for backward compatibility
+            modalTask: activeTask,
+            setModalTask: setActiveTask,
             updateTaskDetails,
             columns,
             setColumns,
-            updateColumn
+            updateColumn,
+            searchNotes,
+            isAddTaskModalOpen,
+            setAddTaskModalOpen,
+            addTaskDefaultColumn,
+            setAddTaskDefaultColumn
         }}>
             {children}
         </AppContext.Provider>

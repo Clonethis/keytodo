@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { clsx } from 'clsx';
 import { Plus, AlignLeft, Link as LinkIcon, GripVertical } from 'lucide-react';
 import { TaskContent } from '../Shared/TaskContent';
+import { AddTaskModal } from '../Modals/AddTaskModal';
 
 // --- Draggable Task Card ---
 const TaskCard = ({ task, id }: { task: any, id: string }) => {
@@ -93,7 +94,7 @@ const TaskCard = ({ task, id }: { task: any, id: string }) => {
 };
 
 // --- Sortable Column ---
-const Column = ({ column, tasks }: { column: any, tasks: any[] }) => {
+const Column = ({ column, tasks, openAddTaskModal }: { column: any, tasks: any[], openAddTaskModal: (columnId?: string) => void }) => {
     const { updateColumn } = useApp();
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(column.title);
@@ -132,7 +133,7 @@ const Column = ({ column, tasks }: { column: any, tasks: any[] }) => {
             ref={setNodeRef}
             style={style}
             className={clsx(
-                "flex flex-col h-full bg-secondary/20 rounded-2xl border border-white/5 transition-colors hover:bg-secondary/30 w-[350px] flex-shrink-0 snap-center",
+                "flex flex-col bg-secondary/20 rounded-2xl border border-white/5 transition-colors hover:bg-secondary/30 w-[350px] flex-shrink-0 snap-center",
                 isDragging && "opacity-50"
             )}
         >
@@ -163,13 +164,17 @@ const Column = ({ column, tasks }: { column: any, tasks: any[] }) => {
                     <span className="bg-background/50 px-2.5 py-0.5 rounded-full text-xs font-bold border border-white/10 opacity-80">{tasks.length}</span>
                 </div>
                 <div className="flex gap-1 opacity-70 hover:opacity-100">
-                    <button className="p-1.5 hover:bg-white/5 rounded text-muted-foreground transition-colors">
+                    <button
+                        onClick={() => openAddTaskModal(column.id)}
+                        className="p-1.5 hover:bg-white/5 rounded text-muted-foreground transition-colors hover:text-primary"
+                        title="Add task to this column"
+                    >
                         <Plus size={16} />
                     </button>
                 </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-4 min-h-[150px] custom-scrollbar">
+            <div className="p-3 space-y-4">
                 <SortableContext id={column.id} items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
                     {tasks.map((task) => (
                         <TaskCard key={task.id} id={task.id} task={task} />
@@ -186,8 +191,23 @@ const Column = ({ column, tasks }: { column: any, tasks: any[] }) => {
 };
 
 export const KanbanBoard = () => {
-    const { tasks, updateTaskStatus, addTask, columns, setColumns } = useApp();
+    const { tasks, updateTaskStatus, addTask, columns, setColumns, isAddTaskModalOpen, setAddTaskModalOpen, addTaskDefaultColumn, setAddTaskDefaultColumn } = useApp();
     const [activeDragItem, setActiveDragItem] = useState<any>(null); // Task or Column
+
+    const openAddTaskModal = (columnId?: string) => {
+        console.log('Opening Add Task Modal', { columnId, isAddTaskModalOpen });
+        setAddTaskDefaultColumn(columnId);
+        setAddTaskModalOpen(true);
+    };
+
+    const handleAddTask = (content: string, columnId?: string) => {
+        // Add the task - it will go to Backlog by default
+        // Then optionally move to the target column via tags
+        let taskContent = content;
+        if (columnId === 'doing') taskContent += ' #doing';
+        else if (columnId === 'qa') taskContent += ' #qa';
+        addTask(taskContent);
+    };
 
     // Filter tasks for each column
     const tasksByColumn = useMemo(() => {
@@ -337,14 +357,14 @@ export const KanbanBoard = () => {
     };
 
     return (
-        <div className="h-full flex flex-col p-4 md:p-8 overflow-hidden">
+        <div className="h-full flex flex-col p-4 md:p-8 overflow-auto custom-scrollbar">
             <header className="mb-6 flex justify-between items-center shrink-0">
                 <div>
                     <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Kanban Board</h1>
                     <p className="text-muted-foreground">Manage your workflow</p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={() => { const t = prompt("Task:"); if (t) addTask(t); }} className="btn btn-primary gap-2 shadow-lg shadow-primary/20">
+                    <button onClick={() => openAddTaskModal()} className="btn btn-primary gap-2 shadow-lg shadow-primary/20">
                         <Plus size={18} />
                         New Task
                     </button>
@@ -358,11 +378,11 @@ export const KanbanBoard = () => {
                 onDragOver={handleDragOver}
                 onDragEnd={handleDragEnd}
             >
-                <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
-                    <div className="flex bg-transparent h-full min-w-max gap-8 px-1">
+                <div className="flex-1 overflow-auto pb-4 custom-scrollbar">
+                    <div className="flex bg-transparent min-w-max min-h-full gap-8 px-1">
                         <SortableContext items={columns.map(c => c.id)} strategy={horizontalListSortingStrategy}>
                             {columns.map(col => (
-                                <Column key={col.id} column={col} tasks={tasksByColumn[col.id]} />
+                                <Column key={col.id} column={col} tasks={tasksByColumn[col.id]} openAddTaskModal={openAddTaskModal} />
                             ))}
                         </SortableContext>
                     </div>
@@ -385,6 +405,15 @@ export const KanbanBoard = () => {
                     )}
                 </DragOverlay>
             </DndContext>
+
+            {/* Add Task Modal */}
+            <AddTaskModal
+                isOpen={isAddTaskModalOpen}
+                onClose={() => setAddTaskModalOpen(false)}
+                onAdd={handleAddTask}
+                defaultColumn={addTaskDefaultColumn}
+                columns={columns.filter(c => c.id !== 'done')}
+            />
         </div>
     );
 };

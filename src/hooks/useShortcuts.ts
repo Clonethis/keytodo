@@ -3,28 +3,44 @@ import { useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 
 export const useShortcuts = () => {
-    const { addTask, activeTask, setActiveTask } = useApp();
+    const {
+        activeTask,
+        setActiveTask,
+        setAddTaskModalOpen,
+        isAddTaskModalOpen,
+    } = useApp();
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // CMD/CTRL + N: New Task
-            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+            // Don't trigger shortcuts when typing in inputs
+            const target = e.target as HTMLElement;
+            const isTyping = target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.isContentEditable;
+
+            // CMD/CTRL + N: Open Add Task Modal
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
                 e.preventDefault();
-                const content = prompt("New Task:");
-                if (content) {
-                    addTask(content);
-                }
+                setAddTaskModalOpen(true);
+                return;
             }
 
-            // ESC: Close Side Panel
+            // Skip ESC handling if typing in an input (let the input handle it)
+            if (isTyping) return;
+
+            // ESC: Close Modal first, then Side Panel
             if (e.key === 'Escape') {
-                if (activeTask) {
+                e.preventDefault();
+                if (isAddTaskModalOpen) {
+                    setAddTaskModalOpen(false);
+                } else if (activeTask) {
                     setActiveTask(null);
                 }
+                return;
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [addTask, activeTask, setActiveTask]);
+    }, [activeTask, setActiveTask, setAddTaskModalOpen, isAddTaskModalOpen]);
 };

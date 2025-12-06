@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { X, Clock, FileText, ExternalLink, AlignLeft } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { clsx } from 'clsx';
 
-export const TaskPanel = () => {
-    const { activeTask, setActiveTask, updateTaskDetails, openLink } = useApp();
+export const TaskPanel = ({ className }: { className?: string }) => {
+    const { activeTask, setActiveTask, updateTaskDetails, openLink, searchNotes } = useApp();
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    // Resizable width state
-    const [width, setWidth] = useState(450);
-    const [isResizing, setIsResizing] = useState(false);
+    // Autocomplete state
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [cursorPosition, setCursorPosition] = useState(0);
+    const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
 
     // Reset state when activeTask changes
     useEffect(() => {
@@ -23,42 +26,18 @@ export const TaskPanel = () => {
         }
     }, [activeTask]);
 
-    // Resizing logic
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!isResizing) return;
-            const newWidth = window.innerWidth - e.clientX;
-            if (newWidth > 300 && newWidth < 800) {
-                setWidth(newWidth);
-            }
-        };
-
-        const handleMouseUp = () => {
-            setIsResizing(false);
-            document.body.style.cursor = 'default';
-        };
-
-        if (isResizing) {
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-            document.body.style.cursor = 'col-resize';
-        }
-
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-            document.body.style.cursor = 'default';
-        };
-    }, [isResizing]);
-
     if (!activeTask) return null;
 
-    const handleSave = async () => {
+    // Modified save to accept direct value or Event
+    const handleSave = async (contentOrEvent?: string | React.FocusEvent<any>) => {
         if (!activeTask) return;
         setIsSaving(true);
+
+        const descToSave = typeof contentOrEvent === 'string' ? contentOrEvent : description;
+
         await updateTaskDetails(activeTask.id, {
             content: title,
-            description: description
+            description: descToSave
         });
         setIsSaving(false);
     };
@@ -67,34 +46,88 @@ export const TaskPanel = () => {
         setActiveTask(null);
     };
 
+    // Handle typing for autocomplete
+    const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const val = e.target.value;
+        setDescription(val);
+        setCursorPosition(e.target.selectionStart);
+
+        // Check for [[
+        // We look backwards from cursor
+        const textBeforeCursor = val.substring(0, e.target.selectionStart);
+        const match = textBeforeCursor.match(/\[\[([^\]]*)$/);
+
+        if (match) {
+            const query = match[1];
+            setShowSuggestions(true);
+            setSuggestions(searchNotes(query));
+            setSelectedSuggestionIndex(0);
+        } else {
+            setShowSuggestions(false);
+        }
+    };
+
+    const handleSuggestionClick = (suggestion: string) => {
+        // Replace [[query with [[suggestion]]
+        // Find the start of the [[ before cursor
+        const textBeforeCursor = description.substring(0, cursorPosition);
+        const textAfterCursor = description.substring(cursorPosition);
+        const lastOpenBracket = textBeforeCursor.lastIndexOf('[[');
+
+        if (lastOpenBracket !== -1) {
+            const newText = textBeforeCursor.substring(0, lastOpenBracket) +
+                `[[${suggestion}]]` +
+                textAfterCursor;
+            setDescription(newText);
+            setShowSuggestions(false);
+            // We should ideally focus back and update cursor, but React state makes this tricky without refs.
+            // But this will trigger a render with new description.
+            handleSave(newText);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (showSuggestions && suggestions.length > 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedSuggestionIndex(prev => (prev + 1) % suggestions.length);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedSuggestionIndex(prev => (prev - 1 + suggestions.length) % suggestions.length);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (suggestions[selectedSuggestionIndex]) {
+                    handleSuggestionClick(suggestions[selectedSuggestionIndex]);
+                }
+            } else if (e.key === 'Escape') {
+                setShowSuggestions(false);
+            }
+        }
+    };
+
     return (
         <div
-            className="h-full bg-card border-l border-white/10 shadow-xl flex flex-col shrink-0 transition-all duration-75 ease-out relative"
-            style={{ width: `${width}px` }}
+            className={clsx(
+                "bg-card shadow-xl flex flex-col shrink-0 min-h-0 transition-all duration-75 ease-out relative",
+                "border-l border-white/10 h-full max-h-full",
+                className
+            )}
         >
-            {/* Drag Handle */}
-            <div
-                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-50 flex items-center justify-center group"
-                onMouseDown={() => setIsResizing(true)}
-            >
-                <div className="h-8 w-1 bg-white/10 rounded-full group-hover:bg-primary transition-colors" />
-            </div>
-
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/5 bg-secondary/20 shrink-0">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-wider font-semibold">
                     <FileText size={14} />
                     <span>Task Details</span>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-1 items-center">
                     <div className="text-[10px] text-muted-foreground self-center px-2">
                         {isSaving ? 'Saving...' : 'All changes saved'}
                     </div>
                     <button
                         onClick={handleClose}
-                        className="p-2 hover:bg-white/5 rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                        className="p-1.5 hover:bg-white/5 rounded-lg transition-colors text-muted-foreground hover:text-foreground"
                     >
-                        <X size={18} />
+                        <X size={16} />
                     </button>
                 </div>
             </div>
@@ -137,46 +170,58 @@ export const TaskPanel = () => {
                 </div>
 
                 {/* Description / Notes */}
-                <div className="mb-8 min-h-[200px]">
+                <div className="mb-8 min-h-[200px] relative">
                     <div className="flex items-center justify-between mb-3">
                         <label className="text-xs text-muted-foreground font-medium flex items-center gap-2">
                             <AlignLeft size={14} /> Connected Note
                         </label>
                     </div>
 
-                    <div className="bg-secondary/30 rounded-xl border border-white/5 overflow-hidden focus-within:ring-1 ring-primary/50 transition-all">
+                    {/* Autocomplete Popup */}
+                    {showSuggestions && suggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 z-50 bg-card border border-white/10 rounded-lg shadow-2xl max-h-48 overflow-y-auto" style={{ bottom: '100%', marginBottom: '4px' }}>
+                            {suggestions.map((suggestion, index) => (
+                                <button
+                                    key={suggestion}
+                                    onClick={() => handleSuggestionClick(suggestion)}
+                                    className={clsx(
+                                        "w-full text-left px-3 py-2 text-sm hover:bg-white/10 transition-colors block",
+                                        index === selectedSuggestionIndex ? 'bg-primary/20 text-primary' : 'text-foreground'
+                                    )}
+                                >
+                                    {suggestion}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="bg-secondary/30 rounded-xl border border-white/5 focus-within:ring-1 ring-primary/50 transition-all relative">
                         <textarea
                             value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            onBlur={handleSave}
-                            className="w-full min-h-[300px] bg-transparent p-4 text-sm leading-relaxed resize-none focus:outline-none font-sans"
-                            placeholder="Add notes, details, or checklists..."
+                            onChange={handleDescriptionChange}
+                            onKeyDown={handleKeyDown}
+                            onBlur={(e) => {
+                                // Delay to allow click on suggestion
+                                setTimeout(() => setShowSuggestions(false), 200);
+                                handleSave(e);
+                            }}
+                            className="w-full min-h-[300px] bg-transparent p-4 text-sm leading-relaxed resize-y focus:outline-none font-sans"
+                            placeholder="Add notes, details, or checklists... Type [[ to link notes"
                         />
                     </div>
                 </div>
 
-                {/* Linked Files Preview */}
-                {activeTask.links && activeTask.links.length > 0 && (
-                    <div className="mt-8 pt-8 border-t border-white/5">
-                        <h4 className="text-sm font-semibold mb-4 text-muted-foreground">Linked Notes</h4>
-                        <div className="flex flex-col gap-2">
-                            {activeTask.links.map(link => (
-                                <button
-                                    key={link}
-                                    onClick={() => openLink(link)}
-                                    className="flex items-center gap-3 w-full p-3 rounded-lg bg-secondary/40 hover:bg-secondary/60 border border-white/5 transition-all text-left group"
-                                >
-                                    <div className="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center text-primary shrink-0">
-                                        <FileText size={16} />
-                                    </div>
-                                    <span className="text-sm flex-1 truncate text-foreground/80 group-hover:text-primary transition-colors">{link}</span>
-                                    <ExternalLink size={14} className="opacity-0 group-hover:opacity-50" />
-                                </button>
-                            ))}
-                        </div>
+                {activeTask.status && (
+                    <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
+                        <button
+                            onClick={() => openLink(activeTask.filePath)}
+                            className="flex items-center gap-2 text-xs text-primary/70 hover:text-primary transition-colors"
+                        >
+                            <ExternalLink size={12} />
+                            Open in Obsidian
+                        </button>
                     </div>
                 )}
-
             </div>
         </div>
     );
