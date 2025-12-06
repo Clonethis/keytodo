@@ -211,7 +211,7 @@ export const TaskPanel = ({ className }: { className?: string }) => {
                     </div>
                 </div>
 
-                {activeTask.status && (
+                {activeTask.filePath && (
                     <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
                         <button
                             onClick={() => openLink(activeTask.filePath)}
